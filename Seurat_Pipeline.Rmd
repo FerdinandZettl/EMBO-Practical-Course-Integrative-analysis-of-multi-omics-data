@@ -1,0 +1,144 @@
+---
+title: "Seurat Pipeline"
+author: "Ferdinand"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load libraries
+
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(hdf5r)
+```
+
+## Load NSCLC dataset
+
+
+```{r }
+nsclc.data = Read10X_h5(filename = "C:/Users/F/Nextcloud/TEst2/Courses/Bioinformagician/Seurat Pipeline/Data/20k_NSCLC_DTC_3p_nextgem_intron_Multiplex_count_raw_feature_bc_matrix.h5")
+
+###what are the modalities and how is the right matrix called?
+str(nsclc.data)
+
+cts = nsclc.data$`Gene Expression`
+
+```
+
+##Create Seurat object with the non-normalized data
+#min.cells = 3 only genes that are expressed in at least 3 cells
+#min.features = 200 only cells that express at least 200 genes (aka. features)
+
+```{r}
+nsclc.sobject = CreateSeuratObject(counts = cts, project = "NSCLC", min.cells = 3, min.features = 200)
+#str(nsclc.sobject)
+nsclc.sobject
+```
+
+##Quality Control
+#1. Percentage of mitochondrial genes
+
+```{r}
+#saves in % in another variable in the metadata of the Seurat object
+nsclc.sobject[["perc.mt"]] = PercentageFeatureSet(nsclc.sobject, pattern = "^MT-")
+
+View(nsclc.sobject@meta.data)
+
+VlnPlot(nsclc.sobject, features = c("nFeature_RNA", "nCount_RNA", "perc.mt"), ncol =3)
+FeatureScatter(nsclc.sobject, feature1 = "nCount_RNA", feature2 = "nFeature_RNA") + geom_smooth(method = "lm")
+```
+
+# 2. Filtering
+```{r}
+nsclc.sobject <- subset(nsclc.sobject, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & perc.mt < 5)
+
+
+```
+
+# 3. Normalize data
+
+```{r}
+nsclc.sobject <- NormalizeData(nsclc.sobject,  normalization.method = "LogNormalize", scale.factor = 10000)
+str(nsclc.sobject)
+```
+
+# 4. Identify highly variable features
+```{r}
+nsclc.sobject <- FindVariableFeatures(nsclc.sobject, selection.method = "vst", nfeatures = 2000)
+
+# Identify the 50 most highly variable genes
+top50 <- head(VariableFeatures(nsclc.sobject), 50)
+
+# plot variable features with and without labels
+plot1 <- VariableFeaturePlot(nsclc.sobject)
+LabelPoints(plot = plot1, points = top50, repel = TRUE)
+```
+# 5. Scaling 
+
+```{r}
+all.genes <- rownames(nsclc.sobject)
+nsclc.sobject <- ScaleData(nsclc.sobject, features = all.genes)
+
+str(nsclc.sobject)
+```
+
+# 6. Linear dimensionality reduction
+
+```{r}
+nsclc.sobject <- RunPCA(nsclc.sobject, features = VariableFeatures(object = nsclc.sobject))
+
+```
+
+# visualize PCA results
+```{r}
+print(nsclc.sobject[["pca"]], dims = 1:5, nfeatures = 5)
+DimHeatmap(nsclc.sobject, dims = 1, cells = 500, balanced = TRUE)
+```
+
+
+# determine dimensionality of the data
+```{r}
+ElbowPlot(nsclc.sobject)
+```
+
+# 7. Clustering
+```{r}
+nsclc.sobject <- FindNeighbors(nsclc.sobject, dims = 1:15)
+```
+
+# understanding resolution
+
+```{r}
+nsclc.sobject <- FindClusters(nsclc.sobject, resolution = c(0.1,0.3, 0.5, 0.7, 1))
+View(nsclc.sobject@meta.data)
+
+DimPlot(nsclc.sobject, group.by = "RNA_snn_res.0.5", label = TRUE)
+
+```
+
+# setting identity of clusters
+```{r}
+Idents(nsclc.sobject)
+Idents(nsclc.sobject) <- "RNA_snn_res.0.1"
+Idents(nsclc.sobject)
+```
+
+# non-linear dimensionality reduction
+```{r}
+reticulate::py_install(packages = 'umap-learn')
+
+nsclc.sobject <- RunUMAP(nsclc.sobject, dims = 1:15)
+```
+
+# note that you can set `label = TRUE` or use the LabelClusters function to help label individual clusters
+
+```{r}
+DimPlot(nsclc.sobject, reduction = "umap")
+
+```
